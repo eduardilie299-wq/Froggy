@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/system_status_service.dart';
 import 'services/update_service.dart';
@@ -120,12 +123,36 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _kRotateHintDismissed = 'rotate_hint_dismissed';
+
   final _updates = UpdateService();
+  bool _locationWarningDismissed = false;
+  bool? _rotateHintDismissed;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    if (kIsWeb) _loadRotateHint();
+  }
+
+  Future<void> _loadRotateHint() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getBool(_kRotateHintDismissed) ?? false;
+    if (mounted) setState(() => _rotateHintDismissed = dismissed);
+  }
+
+  Future<void> _dismissRotateHint() async {
+    setState(() => _rotateHintDismissed = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kRotateHintDismissed, true);
+  }
+
+  bool _isMobilePortrait(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    if (size.height <= size.width) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
   }
 
   @override
@@ -255,6 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context, _) {
           if (!weather.ready) return const SplashScreen();
           final kiosk = settings.settings.kioskMode;
+          final overlayPad =
+              (MediaQuery.sizeOf(context).height * 0.06).clamp(16.0, 32.0);
           return Stack(
             fit: StackFit.expand,
             children: [
@@ -276,8 +305,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Align(
                     alignment: Alignment.bottomRight,
                     child: Padding(
-                      padding: const EdgeInsets.all(8),
+                      padding: kIsWeb
+                          ? EdgeInsets.only(
+                              right: overlayPad, bottom: overlayPad)
+                          : const EdgeInsets.all(8),
                       child: IconButton(
+                        padding: kIsWeb ? EdgeInsets.zero : null,
+                        constraints: kIsWeb ? const BoxConstraints() : null,
                         icon: const Icon(Icons.settings),
                         color: Colors.white,
                         iconSize: 28,
@@ -303,6 +337,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+              if (kIsWeb &&
+                  weather.locationDenied &&
+                  !_locationWarningDismissed)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: SafeArea(
+                    child: _LocationWarning(
+                      onRetry: weather.refresh,
+                      onDismiss: () =>
+                          setState(() => _locationWarningDismissed = true),
+                    ),
+                  ),
+                ),
+              if (kIsWeb &&
+                  _rotateHintDismissed == false &&
+                  _isMobilePortrait(context))
+                _RotateHint(onDismiss: _dismissRotateHint),
             ],
           );
         },
@@ -339,6 +392,102 @@ class ScreensaverScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _RotateHint extends StatelessWidget {
+  const _RotateHint({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: 0.82),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.screen_rotation,
+                    color: Colors.white, size: 48),
+                const SizedBox(height: 20),
+                const Text(
+                  'Froggy looks best in landscape',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Rotate your phone sideways for the full view.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: onDismiss,
+                  child: const Text('Got it'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocationWarning extends StatelessWidget {
+  const _LocationWarning({required this.onRetry, required this.onDismiss});
+
+  final VoidCallback onRetry;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.location_off, color: Colors.amber, size: 22),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Location is blocked, so this is your approximate area. '
+                  'Allow location in your browser, then Retry.',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+              TextButton(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                tooltip: 'Dismiss',
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

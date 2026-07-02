@@ -56,6 +56,8 @@ class WeatherController extends ChangeNotifier {
   String? _error;
   String? _locationName;
   bool _loading = false;
+  bool _locationDenied = false;
+  bool _usingApproximateLocation = false;
 
   WeatherData? get weather => _data;
   SceneAssets? get scene => _scene;
@@ -65,6 +67,9 @@ class WeatherController extends ChangeNotifier {
 
   String? get locationName => _locationName;
   bool get loading => _loading;
+
+  bool get locationDenied => _locationDenied;
+  bool get usingApproximateLocation => _usingApproximateLocation;
   List<String> get scenes => _catalog?.scenes ?? const [];
 
   Future<void> init() async {
@@ -104,6 +109,10 @@ class WeatherController extends ChangeNotifier {
     notifyListeners();
     try {
       final resolved = await _resolveLocation();
+      if (resolved != null) {
+        _usingApproximateLocation = resolved.source == LocationSource.ip;
+        _locationDenied = resolved.permissionDenied;
+      }
       var coords = resolved?.coords ?? await _cache.loadLocation();
       if (coords == null) {
         throw const WeatherException('Location unavailable');

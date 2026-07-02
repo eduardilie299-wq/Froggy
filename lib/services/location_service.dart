@@ -9,10 +9,22 @@ class Coords {
   const Coords(this.lat, this.lon);
 }
 
+enum LocationSource { device, ip }
+
 class ResolvedLocation {
   final Coords coords;
   final String? name;
-  const ResolvedLocation(this.coords, this.name);
+
+  final LocationSource source;
+
+  final bool permissionDenied;
+
+  const ResolvedLocation(
+    this.coords,
+    this.name, {
+    this.source = LocationSource.device,
+    this.permissionDenied = false,
+  });
 }
 
 class LocationService {
@@ -24,17 +36,29 @@ class LocationService {
     bool allowPrompt = true,
     bool useDevice = true,
   }) async {
+    var denied = false;
     if (useDevice) {
       final device = await _deviceLocation(allowPrompt: allowPrompt);
-      if (device != null) return ResolvedLocation(device, null);
+      if (device.coords != null) {
+        return ResolvedLocation(device.coords!, null);
+      }
+      denied = device.denied;
     }
-    return _ipLocation();
+    final ip = await _ipLocation();
+    if (ip == null) return null;
+    return ResolvedLocation(
+      ip.coords,
+      ip.name,
+      source: LocationSource.ip,
+      permissionDenied: denied,
+    );
   }
 
-  Future<Coords?> _deviceLocation({required bool allowPrompt}) async {
+  Future<({Coords? coords, bool denied})> _deviceLocation(
+      {required bool allowPrompt}) async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        return _lastKnown();
+        return (coords: await _lastKnown(), denied: false);
       }
 
       var perm = await Geolocator.checkPermission();
@@ -43,7 +67,7 @@ class LocationService {
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
-        return _lastKnown();
+        return (coords: await _lastKnown(), denied: true);
       }
 
       final pos = await Geolocator.getCurrentPosition(
@@ -52,9 +76,9 @@ class LocationService {
           timeLimit: Duration(seconds: 10),
         ),
       );
-      return Coords(pos.latitude, pos.longitude);
+      return (coords: Coords(pos.latitude, pos.longitude), denied: false);
     } catch (_) {
-      return _lastKnown();
+      return (coords: await _lastKnown(), denied: false);
     }
   }
 
